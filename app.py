@@ -3,6 +3,8 @@ from data import Articles
 from flask_mysqldb import MySQL
 from wtforms import Form, StringField, TextAreaField, PasswordField, validators
 from passlib.hash import sha256_crypt
+from functools import wraps
+
 
 app = Flask(__name__)
 
@@ -16,7 +18,7 @@ app.config['MYSQL_DB'] = 'myflaskapp'
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql.init_app(app)
 
-Articles = Articles()
+#Articles = Articles()
 @app.route('/')
 def index():
     return render_template('home.html')
@@ -27,11 +29,23 @@ def about():
 
 @app.route('/articles')
 def articles():
-    return render_template('articles.html', articles = Articles)
+    cursor = mysql.connection.cursor()
+    result = cursor.execute("SELECT * FROM articles")
+    articles = cursor.fetchall()
+
+    if result > 0:
+        return render_template('articles.html', articles=articles)
+    else:
+        msg = 'No articles found'
+        return render_template('articles.html', msg=msg)
 
 @app.route('/article/<string:id>/')
 def article(id):
-    return render_template('article.html', id=id)
+    cursor = mysql.connection.cursor()
+    result = cursor.execute("SELECT * FROM articles WHERE id= %s", [id])
+    articles = cursor.fetchone()
+
+    return render_template('article.html', article=articles)
 
 class RegisterForm(Form):
     name = StringField('Name', [validators.Length(min=1, max=50)])
@@ -108,9 +122,135 @@ def login():
     return render_template('login.html')
 
 
+#Checking if user Logged in
+
+def is_logged_in(f):
+        @wraps(f)
+        def wrap(*args, **kwargs):
+            if 'logged_in' in session:
+                return f(*args, **kwargs)
+            else:
+                flash('Unauthorized, Please login', 'danger')
+                return redirect(url_for('login'))
+        return wrap
+
+# Logout
+
+@app.route('/logout')
+@is_logged_in
+def logout():
+    session.clear()
+    flash('You are now logout', 'success')
+    return redirect(url_for('login'))
+
+
+#Dashboard
 @app.route('/dashboard')
+@is_logged_in
 def dashboard():
-    return render_template('dashboard.html')
+
+    #Create Cursor
+    cursor = mysql.connection.cursor()
+    result = cursor.execute("SELECT * FROM articles")
+    articles = cursor.fetchall()
+
+    if result > 0:
+        return render_template('dashboard.html', articles=articles)
+    else:
+        msg = 'No articles found'
+        return render_template('dashboard.html', msg=msg)
+
+
+# Article Form Class
+
+class ArticleForm(Form):
+    title = StringField('Title', [validators.Length(min=1, max=200)])
+    body = TextAreaField('Body', [validators.Length(min=30)])
+    
+
+
+#Add Article
+@app.route('/add_article', methods=['GET', 'POST'])
+@is_logged_in
+def add_article():
+    form = ArticleForm(request.form)
+    if request.method == 'POST' and form.validate():
+        title = form.title.data
+        body = form.body.data
+
+        #Create Cursor
+        cursor = mysql.connection.cursor()
+
+         #Execute Query
+        cursor.execute("INSERT INTO articles(title, body, author) VALUES(%s, %s, %s)", (title, body, session['username']))
+
+        # Commit to DB
+        mysql.connection.commit()
+
+        #Close Connection
+        cursor.close()
+
+        flash('Article Created', 'success')
+
+        return redirect(url_for('dashboard'))
+
+    return render_template('add_article.html', form=form)
+
+#Edit Article
+@app.route('/edit_article/<string:id>', methods=['GET', 'POST'])
+@is_logged_in
+def edit_article(id):
+    
+    cursor = mysql.connection.cursor()
+    result = cursor.execute("SELECT * FROM articles WHERE id=%s", [id])
+    article = cursor.fetchone()
+
+    form = ArticleForm(request.form)
+
+    form.title.data = article['title']
+    form.title.body = article['body']
+    
+    if request.method == 'POST' and form.validate():
+        title = request.form['title']
+        body = request.form['body']
+
+        #Create Cursor
+        cursor = mysql.connection.cursor()
+
+         #Execute Query
+        cursor.execute("UPDATE articles SET title=%s, body=%s WHERE id = %s", (title, body, id))
+
+        # Commit to DB
+        mysql.connection.commit()
+
+        #Close Connection
+        cursor.close()
+
+        flash('Article Updated', 'success')
+
+        return redirect(url_for('dashboard'))
+
+    return render_template('edit_article.html', form=form)
+
+
+#Delete
+@app.route('/delete_article/<string:id>', methods=['POST'])
+@is_logged_in
+def delete_article(id):
+    cursor = mysql.connection.cursor()
+    cursor.execute("DELETE FROM articles WHERE id = %s", [id])
+
+        # Commit to DB
+    mysql.connection.commit()
+
+        #Close Connection
+    cursor.close()
+
+    flash('Article Deleted', 'success')
+
+    return redirect(url_for('dashboard'))
+
+
 
 if __name__ == '__main__':
     app.secret_key = 'secret123'

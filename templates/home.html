@@ -1,5 +1,12 @@
 {% extends 'layout.html' %}
 
 {% block body %}
-  HOME
+  <div class = "jumbotron text-center">
+    <h1>Welcome to VBlog</h1>
+    <p class="lead">This is a Simple blog application</p>
+    {% if session.logges_in == NULL %}
+      <a href="/register" class="btn btn-primary btn-lg">Register</a>
+      <a href="/login" class="btn btn-success btn-lg">Login</a>
+    {% endif %}
+  </div>
 {% endblock %}
